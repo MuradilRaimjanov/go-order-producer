@@ -1,12 +1,13 @@
 package handlers
 
 import (
-	"encoding/json"
 	"go-order-producer/internal/database"
 	"go-order-producer/internal/models"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 type Handlers struct {
@@ -17,124 +18,126 @@ func NewHandlers(store *database.TaskStore) *Handlers {
 	return &Handlers{store: store}
 }
 
-func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(payload)
-}
-
-func respondWithError(w http.ResponseWriter, statusCode int, message string) {
-	respondWithJSON(w, statusCode, map[string]string{"error": message})
-}
-
-func (h *Handlers) GetAllTasks(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) GetAllTasks(c echo.Context) error {
 	tasks, err := h.store.GetAll()
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Ошибка получения задач")
-		return
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Ошибка получения задач",
+		})
 	}
 
-	respondWithJSON(w, http.StatusOK, tasks)
+	return c.JSON(http.StatusOK, tasks)
 }
 
-func (h *Handlers) GetTaskById(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/tasks/"), "/")
-	idStr := pathParts[0]
+func (h *Handlers) GetTaskById(c echo.Context) error {
+	idStr := c.Param("id")
 
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Некорректный ID задачи")
-		return
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Некорректный ID задачи",
+		})
 	}
 
 	task, err := h.store.GetByID(id)
 	if err != nil {
-		respondWithError(w, http.StatusNotFound, err.Error())
-		return
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": err.Error(),
+		})
 	}
 
-	respondWithJSON(w, http.StatusOK, task)
+	return c.JSON(http.StatusOK, task)
 }
 
-func (h *Handlers) CreateTask(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) CreateTask(c echo.Context) error {
 	var input models.CreateTaskInput
 
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respondWithError(w, http.StatusBadRequest, err.Error())
-		return
+	// Автоматический bind JSON → struct
+	if err := c.Bind(&input); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
 	}
 
 	if strings.TrimSpace(input.Title) == "" {
-		respondWithError(w, http.StatusBadRequest, "Некоррекно оправлен заголовок задачи")
-		return
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Некорректно отправлен заголовок задачи",
+		})
 	}
 
 	task, err := h.store.Create(input)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, err.Error())
-		return
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
 	}
 
-	respondWithJSON(w, http.StatusCreated, task)
+	return c.JSON(http.StatusCreated, task)
 }
 
-func (h *Handlers) UpdateTask(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/tasks/"), "/")
-	idStr := pathParts[0]
-
+func (h *Handlers) UpdateTask(c echo.Context) error {
+	// Получаем ID из пути
+	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
-
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, err.Error())
-		return
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Некорректный ID задачи",
+		})
 	}
 
+	// Читаем JSON из body
 	var input models.UpdateTaskInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Некорректный данные")
-		return
+	if err := c.Bind(&input); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Некорректные данные",
+		})
 	}
 
+	// Проверка заголовка задачи
 	if input.Title != nil && strings.TrimSpace(*input.Title) == "" {
-		respondWithError(w, http.StatusBadRequest, "Заголовок не корректен")
-		return
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Заголовок не корректен",
+		})
 	}
 
+	// Обновление задачи
 	task, err := h.store.Update(id, input)
-
 	if err != nil {
 		if strings.Contains(err.Error(), "record not found") {
-			respondWithError(w, http.StatusNotFound, err.Error())
-			return
-		} else {
-			respondWithError(w, http.StatusInternalServerError, err.Error())
-			return
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": err.Error(),
+			})
 		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
 	}
 
-	respondWithJSON(w, http.StatusOK, task)
+	return c.JSON(http.StatusOK, task)
 }
 
-func (h *Handlers) DeleteTask(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/tasks/"), "/")
-	idStr := pathParts[0]
-
+func (h *Handlers) DeleteTask(c echo.Context) error {
+	// Получаем ID из пути
+	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Некоррекный id задачи")
-		return
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Некорректный ID задачи",
+		})
 	}
 
+	// Удаляем задачу
 	err = h.store.Delete(id)
 	if err != nil {
 		if strings.Contains(err.Error(), "record not found") {
-			respondWithError(w, http.StatusNotFound, err.Error())
-			return
-		} else {
-			respondWithError(w, http.StatusInternalServerError, err.Error())
-			return
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": err.Error(),
+			})
 		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
 	}
 
-	respondWithJSON(w, http.StatusOK, map[string]string{"result": "success"})
+	return c.JSON(http.StatusOK, map[string]string{"result": "success"})
 }
