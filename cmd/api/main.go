@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"go-order-producer/internal/database"
 	"go-order-producer/internal/handlers"
 	"log"
@@ -49,7 +50,7 @@ func main() {
 
 	serverAddr := ":" + serverPort
 
-	if err := e.Start(serverAddr); err != nil && err != http.ErrServerClosed {
+	if err := e.Start(serverAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }
